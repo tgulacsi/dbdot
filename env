@@ -1,0 +1,36 @@
+#!/bin/sh
+if [ -n "$CGO_CFLAGS" ] || [ -n "$CGO_LDFLAGS" ]; then
+    return
+fi
+cdir=
+ldir=
+if [ -z "$ORACLE_HOME" ]; then
+    nm=$(find /u01/app/oracle/product /usr/lib/oracle -name 'oracle_env.sh' \
+        -type f 2>/dev/null | head -n1)
+    if [ -n "$nm" ]; then
+        . $nm
+    fi
+fi
+for bdn in $ORACLE_HOME /usr/include; do
+    cdir=$(find $bdn -type f -name oci.h 2>/dev/null | head -n1)
+    if [ -n "$cdir" ]; then
+        cdir=$(dirname $cdir)
+        break
+    fi
+done
+for bdn in $ORACLE_HOME /usr/lib; do
+    ldir=$(find $bdn -type f -name libclntsh.so\* 2>/dev/null | head -n1)
+    if [ -n "$ldir" ]; then
+        ldir=$(dirname $ldir)
+        break
+    fi
+done
+echo "cdir=$cdir ldir=$ldir"
+export CGO_CFLAGS=-I$cdir
+export CGO_LDFLAGS=-L$ldir
+export NLS_LANG=american_america.AL32UTF8
+
+echo "export ORACLE_HOME=$ORACLE_HOME"
+echo "export CGO_CFLAGS=$CGO_CFLAGS"
+echo "export CGO_LDFLAGS=$CGO_LDFLAGS"
+echo "export NLS_LANG=$NLS_LANG"
