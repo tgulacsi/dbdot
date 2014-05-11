@@ -198,7 +198,9 @@ func getTables(db *sql.DB) ([]table, error) {
 				tables = append(tables, t)
 			}
 			prev = act
+			t.Name = act
 			t.Comment = tableNames[act]
+			t.Fields = make([]field, 0, 8)
 		}
 		glog.V(2).Infof("field %s", f)
 		t.Fields = append(t.Fields, f)
