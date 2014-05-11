@@ -1,12 +1,14 @@
 package main
 
 import (
+	"archive/zip"
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"flag"
-	"fmt"
 	"io"
 	"log"
-	"sync"
+	"os"
 
 	"github.com/golang/glog"
 	"github.com/juju/errgo"
@@ -16,34 +18,82 @@ import (
 
 func main() {
 	flagDsn := flag.String("connect", "", "database connection string")
+	flagZip := flag.String("zip", "", "save here (if connect is specified), or load from here (if connect is empty)")
 	flag.Parse()
 
-	if *flagDsn == "" {
-		log.Fatal("a database connection string is needed!")
-	}
+	tables := make([]table, 0, 128)
+	sources := make([]source, 0, 128)
 
-	db, err := sql.Open("gocilib", *flagDsn)
-	if err != nil {
-		log.Fatalf("error connecting to %q: %v", *flagDsn, err)
-	}
-	var errMu sync.Mutex
-	tables := make(chan table, 8)
-	go func() {
-		if e := getTables(db, tables); e != nil {
-			errMu.Lock()
-			err = e
-			errMu.Unlock()
+	if *flagDsn == "" {
+		if *flagZip == "" {
+			log.Fatal("a database connection string or a specified zip is needed!")
 		}
-	}()
-	for tbl := range tables {
-		glog.V(1).Infof("table %#v", tbl)
-		fmt.Printf("%#v", tbl)
+		zr, err := zip.OpenReader(*flagZip)
+		if err != nil {
+			log.Fatalf("error opening %q: %v", *flagZip, err)
+		}
+		defer zr.Close()
+		for _, f := range zr.File {
+			if !(f.Name == "tables.json" || f.Name == "sources.json") {
+				continue
+			}
+			rc, err := f.Open()
+			if err != nil {
+				log.Fatal("error opening %q: %v", f.Name, err)
+			}
+			switch f.Name {
+			case "tables.json":
+				err = json.NewDecoder(rc).Decode(&tables)
+			case "packages.json":
+				err = json.NewDecoder(rc).Decode(&sources)
+			}
+			rc.Close()
+			if err != nil {
+				log.Fatalf("error decoding from %q: %v", f.Name, err)
+			}
+		}
+	} else {
+		db, err := sql.Open("gocilib", *flagDsn)
+		if err != nil {
+			log.Fatalf("error connecting to %q: %v", *flagDsn, err)
+		}
+		tables, err := getTables(db)
+		if err != nil {
+			log.Fatalf("error getting tables: %s", errgo.Details(err))
+		}
+		sources, err := getSources(db)
+		if err != nil {
+			log.Fatalf("error getting sources: %s", errgo.Details(err))
+		}
+
+		// save
+		if *flagZip != "" {
+			glog.Infof("saving data to %q", *flagZip)
+			zfh, err := os.Create(*flagZip)
+			if err != nil {
+				log.Fatalf("error creating %q: %v", *flagZip, err)
+			}
+			defer zfh.Close()
+			zw := zip.NewWriter(zfh)
+			defer zw.Close()
+
+			w, err := zw.Create("tables.json")
+			if err != nil {
+				log.Fatal("error creating tables.json: %v", err)
+			}
+			if err = json.NewEncoder(w).Encode(tables); err != nil {
+				log.Fatal("error encoding tables: %v", err)
+			}
+
+			w, err = zw.Create("sources.json")
+			if err != nil {
+				log.Fatal("error creating sources.json")
+			}
+			if err = json.NewEncoder(w).Encode(sources); err != nil {
+				log.Fatal("error encoding sources: %v", err)
+			}
+		}
 	}
-	errMu.Lock()
-	if err != nil {
-		glog.Errorf("ERROR: %v", err)
-	}
-	errMu.Unlock()
 }
 
 type table struct {
@@ -55,50 +105,86 @@ type field struct {
 	Name, Type, Comment string
 }
 
-func getTables(db *sql.DB, tables chan<- table) error {
-	defer close(tables)
-	var firstErr error
-	errs := make(chan error, 8)
-	var errWg sync.WaitGroup
-	errWg.Add(1)
-	go func() {
-		defer errWg.Done()
-		for e := range errs {
-			if e != nil {
-				log.Printf("error %v", e)
-				if firstErr == nil {
-					firstErr = e
-				}
-			}
-		}
-	}()
-	partTables := make(chan table, 0)
-	var workWg sync.WaitGroup
-	workWg.Add(1)
-	go func() {
-		errs <- getTableNames(db, partTables)
-		workWg.Done()
-	}()
+type source struct {
+	Name, Type string
+	Code       string
+}
 
-	for i := 0; i < 8; i++ {
-		workWg.Add(1)
-		go func() {
-			defer workWg.Done()
-			for tbl := range partTables {
-				fields, err := getTableFields(db, tbl.Name)
-				if err != nil {
-					errs <- err
-					return
-				}
-				tbl.Fields = fields
-				tables <- tbl
-			}
-		}()
+func getSources(db *sql.DB) ([]source, error) {
+	sources := make([]source, 0, 64)
+	qry := `SELECT name, type, text FROM user_source
+	          ORDER BY name, type, line`
+	rows, err := db.Query(qry)
+	if err != nil {
+		return nil, errgo.Notef(err, qry)
 	}
-	workWg.Wait()
-	close(errs)
-	errWg.Wait()
-	return firstErr
+	var s, t source
+	lines := bytes.NewBuffer(make([]byte, 0, 1<<20))
+	for rows.Next() {
+		var line string
+		if err = rows.Scan(&t.Name, &t.Type, &line); err != nil {
+			log.Printf("error scanning source: %v", err)
+			continue
+		}
+		if s.Name != t.Name {
+			if s.Name != "" {
+				s.Code = lines.String()
+				sources = append(sources, s)
+			}
+			s = t
+			lines.Reset()
+		}
+		lines.WriteString(line)
+	}
+	if t.Name != "" {
+		t.Code = lines.String()
+		sources = append(sources, t)
+	}
+	if err = rows.Err(); err != nil && err != io.EOF {
+		return sources, errgo.Mask(err)
+	}
+	return sources, nil
+}
+
+func getTables(db *sql.DB) ([]table, error) {
+	tableNames, err := getTableNames(db)
+	if err != nil {
+		return nil, errgo.Notef(err, "table names")
+	}
+
+	qry := `SELECT A.table_name, A.column_name, A.data_type, NVL(B.comments, ' ')
+      FROM user_col_comments B, user_tab_cols A
+        WHERE B.column_name(+) = A.column_name AND
+              B.table_name(+) = A.table_name
+	    ORDER BY A.table_name, A.column_id`
+	rows, err := db.Query(qry)
+	if err != nil {
+		return nil, errgo.Notef(err, qry)
+	}
+	tables := make([]table, 0, len(tableNames))
+	var t table
+	var act, prev string
+	for rows.Next() {
+		var f field
+		if err = rows.Scan(&act, &f.Name, &f.Type, &f.Comment); err != nil {
+			glog.Warningf("error scanning field: %v", err)
+			continue
+		}
+		if prev != act {
+			if prev != "" {
+				tables = append(tables, t)
+			}
+			prev = act
+			t.Comment = tableNames[act]
+		}
+		glog.V(2).Infof("field %s", f)
+		t.Fields = append(t.Fields, f)
+	}
+	tables = append(tables, t)
+	if err = rows.Err(); err != nil && err != io.EOF {
+		return tables, errgo.Mask(err)
+	}
+	return tables, nil
 }
 
 func getTableFields(db *sql.DB, tbl string) ([]field, error) {
@@ -130,30 +216,30 @@ func getTableFields(db *sql.DB, tbl string) ([]field, error) {
 	return fields, nil
 }
 
-func getTableNames(db *sql.DB, tables chan<- table) error {
-	defer close(tables)
+func getTableNames(db *sql.DB) (map[string]string, error) {
 	qry := `SELECT A.table_name, NVL(B.comments, ' ')
               FROM user_tab_comments B, user_tables A
               WHERE B.table_name(+) = A.table_name AND
                     (A.table_name LIKE 'T_%' OR A.table_name LIKE 'R_%')`
 	rows, err := db.Query(qry)
 	if err != nil {
-		return errgo.Notef(err, qry)
+		return nil, errgo.Notef(err, "query %q", qry)
 	}
+	tables := make(map[string]string, 128)
 	for rows.Next() {
-		var tbl table
-		if err = rows.Scan(&tbl.Name, &tbl.Comment); err != nil {
-			log.Printf("error scanning table name: %v", err)
+		var name, comment string
+		if err = rows.Scan(&name, &comment); err != nil {
+			glog.Warningf("error scanning table name: %v", err)
 			continue
 		}
-		if tbl.Comment == " " {
-			tbl.Comment = ""
+		if comment == " " {
+			comment = ""
 		}
-		glog.V(1).Infof("part %s", tbl)
-		tables <- tbl
+		glog.V(1).Infof("table %s (%q)", name, comment)
+		tables[name] = comment
 	}
 	if err := rows.Err(); err != nil && err != io.EOF {
-		return errgo.Mask(err)
+		return tables, errgo.Notef(err, "rows")
 	}
-	return nil
+	return tables, nil
 }
