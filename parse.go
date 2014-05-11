@@ -77,3 +77,9 @@ Loop:
 	}
 	return selects
 }
+
+// selectGetLinks parses code (which should be a SELECT statement only)
+// and returns the table1.field1 = table2.field2 pairs.
+func selectGetLinks(code string) [][2]string {
+	return nil
+}
