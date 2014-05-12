@@ -41,10 +41,8 @@ func makeDot(w io.Writer, tables []table, sources []source) error {
 	// edges
 	edges := make(map[link]struct{}, 512)
 	for _, src := range sources {
-		if src.Type == "PACKAGE" {
-			continue
-		}
-		for _, sel := range getSelects(src.Code) {
+		code := src.Code
+		for _, sel := range getSelects(code) {
 			for _, lnk := range selectGetLinks(sel) {
 				if _, ok := tableNames[lnk.A.Table]; !ok {
 					glog.Infof("%q is not a table name.", lnk.A.Table)

@@ -59,7 +59,10 @@ func selectGetLinks(code string) []link {
 	glog.V(1).Infof("tables=%#v", tables)
 
 	equations := whereEquations(where, tables)
-	glog.V(1).Infof("equations=%#v", equations)
+	if len(equations) == 0 {
+		glog.V(1).Infof("no eqs in %q (where=%q tables=%q)", code, where, tables)
+		return nil
+	}
 	links := make([]link, 0, len(equations))
 	var lnkScratch [2]linkField
 	for _, eq := range equations {
@@ -126,18 +129,12 @@ func fromTables(from string) map[string]string {
 	tables := make(map[string]string, 2)
 	for _, part := range strings.Split(from, ",") {
 		part = strings.TrimSpace(part)
-		if len(part) == 0 {
+		if len(part) == 0 || strings.IndexAny(part, "()") >= 0 {
 			continue
 		}
 		i := strings.LastIndex(part, " ")
 		if i < 0 {
-			if strings.HasSuffix(part, ")") {
-				continue
-			}
 			tables[strings.ToUpper(part)] = part
-			continue
-		}
-		if strings.HasSuffix(part[:i], ")") {
 			continue
 		}
 		tables[strings.ToUpper(part[i+1:])] = part[:i]

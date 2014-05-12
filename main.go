@@ -136,6 +136,7 @@ type source struct {
 func getSources(db *sql.DB) ([]source, error) {
 	sources := make([]source, 0, 64)
 	qry := `SELECT name, type, text FROM user_source
+			  WHERE name LIKE 'DB_%'
 	          ORDER BY name, type, line`
 	rows, err := db.Query(qry)
 	if err != nil {
@@ -178,7 +179,8 @@ func getTables(db *sql.DB) ([]table, error) {
 	qry := `SELECT A.table_name, A.column_name, A.data_type, NVL(B.comments, ' ')
       FROM user_col_comments B, user_tab_cols A
         WHERE B.column_name(+) = A.column_name AND
-              B.table_name(+) = A.table_name
+              B.table_name(+) = A.table_name AND
+			  SUBSTR(A.table_name, 1, 2) IN ('T_', 'R_')
 	    ORDER BY A.table_name, A.column_id`
 	rows, err := db.Query(qry)
 	if err != nil {
