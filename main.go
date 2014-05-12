@@ -114,7 +114,7 @@ func main() {
 	}
 
 	defer os.Stdout.Close()
-	if err := makeDot(os.Stdout, tables); err != nil {
+	if err := makeDot(os.Stdout, tables, sources); err != nil {
 		log.Fatalf("error creating dot: %v", err)
 	}
 }

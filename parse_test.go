@@ -17,11 +17,54 @@ limitations under the License.
 package main
 
 import (
+	"reflect"
 	"regexp"
 	"testing"
 )
 
 var rSpaces = regexp.MustCompile("[ \t\n]+")
+
+func TestLinks(t *testing.T) {
+	for i, c := range []struct {
+		Code  string
+		Links [][2]string
+	}{
+		{"aaa", nil},
+		{"SELECT x FROM table A WHERE A.f= 1", nil},
+		{"SELECT x FROM Btab B, Atab A WHERE A.f = B.c", [][2]string{{"A.f", "B.c"}}},
+	} {
+		got := selectGetLinks(c.Code)
+		if len(got) != len(c.Links) {
+			t.Errorf("%d. count mismatch: got %d, awaited %d (%q).", i, len(got), len(c.Links), c.Code)
+			continue
+		}
+		for j, v := range got {
+			if !(v[0] == c.Links[j][0] && v[1] == c.Links[j][1]) {
+				t.Errorf("%d. %d mismatch: got %s, awaited %s (%q).", i, j, got, c.Links, c.Code)
+			}
+		}
+	}
+}
+
+func TestFromTables(t *testing.T) {
+	for i, c := range []struct {
+		From   string
+		Tables map[string]string
+	}{
+		{"aaa", map[string]string{"AAA": "aaa"}},
+		{"table A", map[string]string{"A": "table"}},
+		{"Btab B, Atab A, Ctab", map[string]string{"A": "Atab", "B": "Btab", "CTAB": "Ctab"}},
+	} {
+		got := fromTables(c.From)
+		if len(got) != len(c.Tables) {
+			t.Errorf("%d. count mismatch: got %d, awaited %d (%q).", i, len(got), len(c.Tables), c.From)
+			continue
+		}
+		if !reflect.DeepEqual(got, c.Tables) {
+			t.Errorf("%d. mismatch: got %s, awaited %s (%q).", i, got, c.Tables, c.From)
+		}
+	}
+}
 
 func TestSelects(t *testing.T) {
 	for i, c := range []struct {
