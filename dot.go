@@ -20,16 +20,19 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/golang/glog"
 )
+
+const html = false
 
 func makeDot(w io.Writer, tables []table, sources []source) error {
 	bw := bufio.NewWriter(w)
 	defer bw.Flush()
 
 	fmt.Fprintln(bw, "graph tables {")
-	bw.WriteString("\tnode [shape=record];\n\trankdir=LR;\n")
+	bw.WriteString("\tnode [shape=record];\n")
 
 	tableNames := make(map[string]struct{}, len(tables))
 	for _, t := range tables {
@@ -60,23 +63,41 @@ func makeDot(w io.Writer, tables []table, sources []source) error {
 	}
 
 	// nodes are the tables
-	for _, t := range tables {
-		//fmt.Fprintf(bw, "\tgraph %s {\n", t.Name)
-		//bw.WriteString("\t\tnode [shape=record];\n\t\trankdir=LR;\n")
-		if _, ok := usedTableNames[t.Name]; !ok {
-			glog.Infof("%q not used, skipping.", t.Name)
-			continue
-		}
-		fmt.Fprintf(bw, "\ttable_%s [label=\"%s|", t.Name, t.Name)
-		for i, f := range t.Fields {
-			//fields[f.Name] = append(fields[f.Name], t.Name)
-			if i > 0 {
-				bw.WriteByte('|')
+	if html {
+		for _, t := range tables {
+			//fmt.Fprintf(bw, "\tgraph %s {\n", t.Name)
+			//bw.WriteString("\t\tnode [shape=record];\n\t\trankdir=LR;\n")
+			if _, ok := usedTableNames[t.Name]; !ok {
+				glog.Infof("%q not used, skipping.", t.Name)
+				continue
 			}
-			fmt.Fprintf(bw, "<%s> %s %s", f.Name, f.Name, f.Type)
+			fmt.Fprintf(bw, "\t"+`table_%s [style=none, label=<
+<table border="0" cellborder="1" cellspacing="0">
+  <tr><td align="center" bgcolor="BLACK"><font color="WHITE"><b>%s</b></font></td></tr>
+`, t.Name, unocaps(t.Name))
+			for _, f := range t.Fields {
+				//fields[f.Name] = append(fields[f.Name], t.Name)
+				fmt.Fprintf(bw, `  <tr><td align="left" PORT="%s">%s %s</td></tr>
+`, f.Name, unocaps(f.Name), f.Type)
+			}
+			bw.WriteString("</table>\n>];\n")
+			//bw.WriteString("\"];\n\t}\n")
 		}
-		bw.WriteString("\"];\n")
-		//bw.WriteString("\"];\n\t}\n")
+	} else {
+		for _, t := range tables {
+			//fmt.Fprintf(bw, "\tgraph %s {\n", t.Name)
+			//bw.WriteString("\t\tnode [shape=record];\n\t\trankdir=LR;\n")
+			if _, ok := usedTableNames[t.Name]; !ok {
+				glog.Infof("%q not used, skipping.", t.Name)
+				continue
+			}
+			fmt.Fprintf(bw, "\ttable_%s [label=\"{%s", t.Name, t.Name)
+			for _, f := range t.Fields {
+				fmt.Fprintf(bw, "|<%s> %s %s", f.Name, unocaps(f.Name), f.Type)
+			}
+			bw.WriteString("}\"];\n")
+			//bw.WriteString("\"];\n\t}\n")
+		}
 	}
 	bw.WriteByte('\n')
 
@@ -90,4 +111,12 @@ func makeDot(w io.Writer, tables []table, sources []source) error {
 
 	fmt.Fprintln(bw, "}")
 	return nil
+}
+
+func unocaps(text string) string {
+	i := strings.IndexByte(text, '_')
+	if i < 0 {
+		return text
+	}
+	return strings.ToUpper(text[:i]) + "_" + strings.ToLower(text[i+1:])
 }
