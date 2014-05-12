@@ -46,10 +46,11 @@ func TestSelects(t *testing.T) {
 
 		`},
 		},
+		{"FOR sor IN (SELECT A FROM (SELECT B))", []string{"SELECT A FROM (SELECT B)"}},
 	} {
 		got := getSelects(c.Code)
 		if len(got) != len(c.Selects) {
-			t.Errorf("%d. count mistmatch: got %d, awaited %d.", i, len(got), len(c.Selects))
+			t.Errorf("%d. count mistmatch: got %d, awaited %d (%q).", i, len(got), len(c.Selects), c.Code)
 			continue
 		}
 		if len(got) == 0 {
@@ -84,6 +85,39 @@ func TestStripComment(t *testing.T) {
 		got := stripComments(c[0])
 		if got != c[1] && stripSpaces(got) != stripSpaces(c[1]) {
 			t.Errorf("%d. got %q, awaited %q.", i, stripSpaces(got), stripSpaces(c[1]))
+		}
+	}
+}
+
+func TestFindEndSemi(t *testing.T) {
+	for i, c := range []struct {
+		Text string
+		Pos  int
+	}{
+		{"abraka", -1},
+		{"aaa;sdd", 3},
+		{"aa';';", 5},
+	} {
+		got := findEndSemi(c.Text)
+		if got != c.Pos {
+			t.Errorf("%d. got %d, awaited %d (%q)", i, got, c.Pos, c.Text)
+		}
+	}
+}
+
+func TestFindEndBracket(t *testing.T) {
+	for i, c := range []struct {
+		Text string
+		Pos  int
+	}{
+		{"(abraka", -1},
+		{"(aaa)sdd", 4},
+		{"(aa')')", 6},
+		{"(aa()')')", 8},
+	} {
+		got := findEndBracket(c.Text)
+		if got != c.Pos {
+			t.Errorf("%d. got %d, awaited %d (%q)", i, got, c.Pos, c.Text)
 		}
 	}
 }

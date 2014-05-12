@@ -49,31 +49,33 @@ func stripComments(code string) string {
 	return code
 }
 
+var rSelect = regexp.MustCompile(`(FOR\s+[^ ]+\s+IN\s*[(]|[^(]\s*)SELECT\s`)
+
 func getSelects(code string) []string {
 	code = stripComments(code)
 	selects := make([]string, 0, 4)
 	i := 0
-Loop:
 	for {
-		start := strings.Index(code[i:], "SELECT ")
-		if start < 0 {
+		loc := rSelect.FindStringIndex(code[i:])
+		if len(loc) == 0 {
 			break
 		}
-		start += i
+		start := i + loc[1] - 7
+		prefix := code[i+loc[0] : i+loc[0]+3]
 		i = start
-		glog.V(2).Infof("start=%d rest=%q", start, code[start:])
-		for j := start + 7; j < len(code); j++ {
-			k := strings.Index(code[j:], ";")
-			if k < 0 {
-				break Loop
-			}
-			j += k
-			glog.V(2).Infof("j=%d rest=%q", j, code[j:])
-			if strings.Count(code[start:j], "'")%2 == 0 {
-				selects = append(selects, code[start:j])
-				break Loop
-			}
+		glog.V(2).Infof("start=%d prefix=%q rest=%q", start, prefix, code[start:])
+		var end int
+		if prefix == "FOR" {
+			end = findEndBracket("("+code[start:]) - 1
+		} else {
+			end = findEndSemi(code[start:])
 		}
+		if end < 0 {
+			glog.Warningf("cannot find end of %q in %q", prefix, code[start:])
+			break
+		}
+		selects = append(selects, code[start:start+end])
+		i = start + end + 1
 	}
 	return selects
 }
@@ -82,4 +84,52 @@ Loop:
 // and returns the table1.field1 = table2.field2 pairs.
 func selectGetLinks(code string) [][2]string {
 	return nil
+}
+
+// findEndSemi returns the closing semicolon
+func findEndSemi(code string) int {
+	return findNonStrConst(code, ";")
+}
+
+func findNonStrConst(code, ending string) int {
+	lastCount, lastPos := 0, 0
+	for j := 0; j < len(code); j += len(ending) {
+		k := strings.Index(code[j:], ending)
+		if k < 0 {
+			return -1
+		}
+		j += k
+		glog.V(2).Infof("j=%d rest=%q", j, code[j:])
+		cnt := lastCount + strings.Count(code[lastPos:j], "'")
+		if cnt%2 == 0 {
+			return j
+		}
+		lastCount, lastPos = cnt, j
+	}
+	return -1
+}
+
+var rStrConst = regexp.MustCompile("'[^']*'")
+
+// findEndBracket returns the closing bracket
+func findEndBracket(code string) int {
+	code = rStrConst.ReplaceAllStringFunc(code, func(needle string) string {
+		return "'" + strings.Repeat("_", len(needle)-2) + "'"
+	})
+	glog.V(2).Infof("findEndBracket(%q)", code)
+	lastCount, lastPos := 0, 0
+	for j := 0; j < len(code); j++ {
+		k := strings.Index(code[j:], ")")
+		if k < 0 {
+			return -1
+		}
+		j += k
+		glog.V(2).Infof("j=%d rest=%q", j, code[j:])
+		cnt := lastCount + strings.Count(code[lastPos:j+1], "(") - strings.Count(code[lastPos:j+1], ")")
+		if cnt == 0 {
+			return j
+		}
+		lastCount, lastPos = cnt, j+1
+	}
+	return -1
 }
