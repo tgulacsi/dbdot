@@ -3,3 +3,5 @@ dbdot
 .dsn
 *.zip
 *.dot
+*.gv
+*.json

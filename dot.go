@@ -40,7 +40,7 @@ func makeDot(w io.Writer, tables []table, sources []source) error {
 		//bw.WriteString("\t\tnode [shape=record];\n\t\trankdir=LR;\n")
 		tableNames[t.Name] = struct{}{}
 	}
-	usedTableNames := make(map[string]struct{}, len(tableNames))
+	usedTables := make(map[string][]string, len(tableNames))
 	// edges
 	edges := make(map[link]struct{}, 512)
 	for _, src := range sources {
@@ -55,8 +55,8 @@ func makeDot(w io.Writer, tables []table, sources []source) error {
 					glog.Infof("%q is not a table name.", lnk.B.Table)
 					continue
 				}
-				usedTableNames[lnk.A.Table] = struct{}{}
-				usedTableNames[lnk.B.Table] = struct{}{}
+				usedTables[lnk.A.Table] = addString(usedTables[lnk.A.Table], lnk.A.Field)
+				usedTables[lnk.B.Table] = addString(usedTables[lnk.B.Table], lnk.B.Field)
 				edges[lnk] = struct{}{}
 			}
 		}
@@ -67,7 +67,8 @@ func makeDot(w io.Writer, tables []table, sources []source) error {
 		for _, t := range tables {
 			//fmt.Fprintf(bw, "\tgraph %s {\n", t.Name)
 			//bw.WriteString("\t\tnode [shape=record];\n\t\trankdir=LR;\n")
-			if _, ok := usedTableNames[t.Name]; !ok {
+			fields, ok := usedTables[t.Name]
+			if !ok {
 				glog.Infof("%q not used, skipping.", t.Name)
 				continue
 			}
@@ -75,10 +76,16 @@ func makeDot(w io.Writer, tables []table, sources []source) error {
 <table border="0" cellborder="1" cellspacing="0">
   <tr><td align="center" bgcolor="BLACK"><font color="WHITE"><b>%s</b></font></td></tr>
 `, t.Name, unocaps(t.Name))
-			for _, f := range t.Fields {
-				//fields[f.Name] = append(fields[f.Name], t.Name)
-				fmt.Fprintf(bw, `  <tr><td align="left" PORT="%s">%s %s</td></tr>
+			for _, fieldName := range fields {
+				for _, f := range t.Fields {
+					if f.Name != fieldName {
+						continue
+					}
+					//fields[f.Name] = append(fields[f.Name], t.Name)
+					fmt.Fprintf(bw, `  <tr><td align="left" PORT="%s">%s %s</td></tr>
 `, f.Name, unocaps(f.Name), f.Type)
+					break
+				}
 			}
 			bw.WriteString("</table>\n>];\n")
 			//bw.WriteString("\"];\n\t}\n")
@@ -87,13 +94,20 @@ func makeDot(w io.Writer, tables []table, sources []source) error {
 		for _, t := range tables {
 			//fmt.Fprintf(bw, "\tgraph %s {\n", t.Name)
 			//bw.WriteString("\t\tnode [shape=record];\n\t\trankdir=LR;\n")
-			if _, ok := usedTableNames[t.Name]; !ok {
+			fields, ok := usedTables[t.Name]
+			if !ok {
 				glog.Infof("%q not used, skipping.", t.Name)
 				continue
 			}
 			fmt.Fprintf(bw, "\ttable_%s [label=\"{%s", t.Name, t.Name)
-			for _, f := range t.Fields {
-				fmt.Fprintf(bw, "|<%s> %s %s", f.Name, unocaps(f.Name), f.Type)
+			for _, fieldName := range fields {
+				for _, f := range t.Fields {
+					if f.Name != fieldName {
+						continue
+					}
+					fmt.Fprintf(bw, "|<%s> %s %s", f.Name, unocaps(f.Name), f.Type)
+					break
+				}
 			}
 			bw.WriteString("}\"];\n")
 			//bw.WriteString("\"];\n\t}\n")
@@ -119,4 +133,13 @@ func unocaps(text string) string {
 		return text
 	}
 	return strings.ToUpper(text[:i]) + "_" + strings.ToLower(text[i+1:])
+}
+
+func addString(strings []string, elt string) []string {
+	for _, v := range strings {
+		if v == elt {
+			return strings
+		}
+	}
+	return append(strings, elt)
 }
