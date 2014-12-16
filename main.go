@@ -27,9 +27,8 @@ import (
 	"os"
 
 	"github.com/golang/glog"
-	"github.com/juju/errgo"
-	_ "github.com/tgulacsi/gocilib/driver"
-	//_ "github.com/tgulacsi/goracle/godrv"
+	_ "github.com/tgulacsi/goracle/godrv"
+	"gopkg.in/errgo.v1"
 )
 
 func main() {
@@ -71,7 +70,7 @@ func main() {
 			}
 		}
 	} else {
-		db, err := sql.Open("gocilib", *flagDsn)
+		db, err := sql.Open("goracle", *flagDsn)
 		if err != nil {
 			log.Fatalf("error connecting to %q: %v", *flagDsn, err)
 		}
